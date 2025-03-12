@@ -268,13 +268,13 @@ int main(int argc, char** argv) {
     auto duration = chrono::duration_cast<chrono::seconds>(end - start);
 
     if (world_rank == 0) {
-        cout << "Tempo de execucao: " << duration.count() << " segundos" << endl;
-        cout << "Melhor rota: ";
+		cout << duration.count() << " segundos" << " = " << best_global_val << endl;
+        /*cout << "Melhor rota: ";
         for (int i = 0; i < best_global_route.size(); i++) {
             cout << best_global_route[i] << " ";
         }
         cout << endl;
-        cout << "Valor da melhor rota: " << best_global_val << endl << endl;
+        cout << "Valor da melhor rota: " << best_global_val << endl << endl;*/
     }
 
     MPI_Finalize();

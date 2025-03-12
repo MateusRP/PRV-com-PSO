@@ -229,9 +229,9 @@ int main() {
 
     auto start = chrono::high_resolution_clock::now();
 
-    #pragma omp parallel for num_threads(2)
+    #pragma omp parallel for num_threads(8)
     for (int i = 0; i < num_iterations; i++) {
-        #pragma omp parallel
+        #pragma omp parallel for
         for (int j = 0; j < num_particles; j++) {
             swarm[j].update(inertia_coeff, cognitive_coeff, social_coeff);
         }
@@ -254,13 +254,13 @@ int main() {
 
     auto end = chrono::high_resolution_clock::now();
     auto duration = chrono::duration_cast<chrono::seconds>(end - start);
-    cout << "Tempo de execucao: " << duration.count() << " segundos" << endl;
-    cout << "Melhor rota: ";
+    cout << duration.count() << " segundos" << " = " << best_global_val << endl;
+    /*cout << "Melhor rota: ";
     for (int i = 0; i < best_global_route.size(); i++) {
         cout << best_global_route[i] << " ";
     }
     cout << endl;
-    cout << "Valor da melhor rota: " << best_global_val << endl << endl;
+    cout << "Valor da melhor rota: " << best_global_val << endl << endl;*/
 
     return 0;
 }
