@@ -5,7 +5,7 @@
 #include <sstream>
 #include <vector>
 #include <chrono>
-#include <omp.h>
+#include <mpi.h>
 #include "tinyxml2.h"
 
 using namespace std;
@@ -127,24 +127,20 @@ public:
         current_value = best_value = evaluate_route();
     }
     void map_route() {
-        // Ordena as posicoes dos valores das particulas
         vector<pair<double, int>> indexed_positions;
         for (int i = 0; i < current_position.size(); ++i) {
             indexed_positions.push_back({ current_position[i], i });
         }
         sort(indexed_positions.begin(), indexed_positions.end());
 
-        // Insere os valores ordenados no vetor de rotas
-        // Último valor representa o deposito
-        // Clientes vão de 0 a size_particle - 1
         for (int i = 0; i < current_position.size(); ++i) {
             current_route[i + 1] = indexed_positions[i].second;
             if (current_route[i + 1] >= client_data.size() - 1) {
                 current_route[i + 1] = client_data.size() - 1;
             }
         }
-        current_route.front() = client_data.size() - 1; // depósito
-        current_route.back() = client_data.size() - 1; // depósito
+        current_route.front() = client_data.size() - 1;
+        current_route.back() = client_data.size() - 1;
     }
     double evaluate_route() {
         double total = 0;
@@ -157,7 +153,7 @@ public:
             else {
                 current_load += client_data[current_route[i]].demand;
                 if (current_load > vehicle_capacity) {
-                    total += 10000000; // penalidade por exceder capacidade
+                    total += 10000000;
                     current_load = client_data[current_route[i]].demand;
                 }
             }
@@ -205,20 +201,30 @@ mt19937 particle::mt(random_device{}());
 uniform_real_distribution<double> particle::init_dist(0, 1000.0);
 uniform_real_distribution<double> particle::update_dist(0, 1.0);
 
-int main() {
-    if (!read_client_file("CMT01.xml")) return 0;
+int main(int argc, char** argv) {
+    MPI_Init(&argc, &argv);
 
-    int num_vehicles = 10; //numero de veiculos
+    int world_size, world_rank;
+    MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+    MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+
+    if (!read_client_file("CMT01.xml")) {
+        MPI_Finalize();
+        return 0;
+    }
+
+    int num_vehicles = 10; // numero de veiculos
     int size_particle = client_data.size() - 1 + num_vehicles - 1; // ajusta o tamanho da partícula
     best_global_position.resize(size_particle);
     best_global_route.resize(size_particle + 2);
 
-    int num_particles = 1200; //Número de partículas
-    int num_iterations = 5000; //Número de iterações
+    int num_particles = 1200; // Número de partículas
+    int num_iterations = 5000; // Número de iterações
 
+    int particles_per_proc = num_particles / world_size;
     vector<particle> swarm;
-    swarm.reserve(num_particles);
-    for (int i = 0; i < num_particles; i++) {
+    swarm.reserve(particles_per_proc);
+    for (int i = 0; i < particles_per_proc; i++) {
         swarm.emplace_back(size_particle);
     }
     best_global_val = 99999999;
@@ -229,38 +235,48 @@ int main() {
 
     auto start = chrono::high_resolution_clock::now();
 
-    #pragma omp parallel for num_threads(2)
     for (int i = 0; i < num_iterations; i++) {
-        #pragma omp parallel
-        for (int j = 0; j < num_particles; j++) {
+        for (int j = 0; j < particles_per_proc; j++) {
             swarm[j].update(inertia_coeff, cognitive_coeff, social_coeff);
         }
-        #pragma omp parallel for
-        for (int j = 0; j < num_particles; j++) {
-        #pragma omp critical
-        {
-            if (swarm[j].get_best_value() < best_global_val) {
-                    best_global_position = swarm[j].get_best_position();
-                    best_global_route = swarm[j].get_current_route();
-                    best_global_val = swarm[j].get_best_value();
-                }
+
+        double local_best_val = best_global_val;
+        vector<double> local_best_position = best_global_position;
+        vector<double> local_best_route = best_global_route;
+
+        for (int j = 0; j < particles_per_proc; j++) {
+            if (swarm[j].get_best_value() < local_best_val) {
+                local_best_position = swarm[j].get_best_position();
+                local_best_route = swarm[j].get_current_route();
+                local_best_val = swarm[j].get_best_value();
             }
-		}
-        #pragma omp single
-        {
+        }
+
+        MPI_Allreduce(&local_best_val, &best_global_val, 1, MPI_DOUBLE, MPI_MIN, MPI_COMM_WORLD);
+        if (local_best_val == best_global_val) {
+            best_global_position = local_best_position;
+            best_global_route = local_best_route;
+        }
+
+        if (world_rank == 0) {
             inertia_coeff -= (0.5 / num_iterations);
         }
+        MPI_Bcast(&inertia_coeff, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
     }
 
     auto end = chrono::high_resolution_clock::now();
     auto duration = chrono::duration_cast<chrono::seconds>(end - start);
-    cout << "Tempo de execucao: " << duration.count() << " segundos" << endl;
-    cout << "Melhor rota: ";
-    for (int i = 0; i < best_global_route.size(); i++) {
-        cout << best_global_route[i] << " ";
-    }
-    cout << endl;
-    cout << "Valor da melhor rota: " << best_global_val << endl << endl;
 
+    if (world_rank == 0) {
+        cout << "Tempo de execucao: " << duration.count() << " segundos" << endl;
+        cout << "Melhor rota: ";
+        for (int i = 0; i < best_global_route.size(); i++) {
+            cout << best_global_route[i] << " ";
+        }
+        cout << endl;
+        cout << "Valor da melhor rota: " << best_global_val << endl << endl;
+    }
+
+    MPI_Finalize();
     return 0;
 }
