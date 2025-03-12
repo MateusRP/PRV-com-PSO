@@ -11,8 +11,7 @@
 using namespace std;
 using namespace tinyxml2;
 
-const int num_vehicles = 20; //numero de veiculos
-const int vehicle_capacity = 550; // capacidade do veículo
+const int vehicle_capacity = 160; // capacidade do veículo
 
 struct Client {
     double cx;
@@ -158,7 +157,7 @@ public:
             else {
                 current_load += client_data[current_route[i]].demand;
                 if (current_load > vehicle_capacity) {
-                    total += 10000; // penalidade por exceder capacidade
+                    total += 10000000; // penalidade por exceder capacidade
                     current_load = client_data[current_route[i]].demand;
                 }
             }
@@ -207,8 +206,9 @@ uniform_real_distribution<double> particle::init_dist(0, 1000.0);
 uniform_real_distribution<double> particle::update_dist(0, 1.0);
 
 int main() {
-    if (!read_client_file("Golden_01.xml")) return 0;
+    if (!read_client_file("CMT01.xml")) return 0;
 
+    int num_vehicles = 10; //numero de veiculos
     int size_particle = client_data.size() - 1 + num_vehicles - 1; // ajusta o tamanho da partícula
     best_global_position.resize(size_particle);
     best_global_route.resize(size_particle + 2);
@@ -229,21 +229,27 @@ int main() {
 
     auto start = chrono::high_resolution_clock::now();
 
-
+    #pragma omp parallel for num_threads(8)
     for (int i = 0; i < num_iterations; i++) {
-#pragma omp parallel for num_threads(8)
+        #pragma omp parallel //for num_threads(8)
         for (int j = 0; j < num_particles; j++) {
             swarm[j].update(inertia_coeff, cognitive_coeff, social_coeff);
         }
+        #pragma omp parallel for
         for (int j = 0; j < num_particles; j++) {
-#pragma omp critical
+        #pragma omp critical
+        {
             if (swarm[j].get_best_value() < best_global_val) {
-                best_global_position = swarm[j].get_best_position();
-                best_global_route = swarm[j].get_current_route();
-                best_global_val = swarm[j].get_best_value();
+                    best_global_position = swarm[j].get_best_position();
+                    best_global_route = swarm[j].get_current_route();
+                    best_global_val = swarm[j].get_best_value();
+                }
             }
+		}
+        #pragma omp single
+        {
+            inertia_coeff -= (0.5 / num_iterations);
         }
-        inertia_coeff -= (0.5 / num_iterations);
     }
 
     auto end = chrono::high_resolution_clock::now();
